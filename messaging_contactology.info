@@ -1,0 +1,5 @@
+name = Contactology Messaging
+description = Sending Method: Send through Contactology service
+package = "Messaging"
+dependencies[] = messaging_mail
+core = 6.x

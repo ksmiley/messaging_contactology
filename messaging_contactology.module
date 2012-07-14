@@ -1,0 +1,169 @@
+<?php
+/**
+ * @file
+ * Send messages through Contactology service. Messaging API plug-in.
+ * 
+*/
+
+/**
+ * Implementation of hook_messaging()
+ * 
+ * Informs the Messaging API of the sending methods provided by this module and
+ * the address types it uses.
+ * 
+ * @param $op
+ *   Type of information to retrieve.
+ * @return mixed
+ *   Depending on $op   
+ */
+function messaging_contactology_messaging($op, $type = NULL) {
+  switch($op) {
+    case 'send methods':
+      $info['contactology'] = array(
+        'title' => 'Contactology',
+        'name' => t('Contactology'), // Name for display
+        'description' => t('Send e-mails using the Contactology service.'),
+        'address_type' => 'mail', // Which kind of address this method uses
+        'group' => 'mail', // Class of sending method
+        'type' => MESSAGING_TYPE_SEND,  // Method type: push || pull
+        'glue' => "", // don't use <br/> nor <br /> for maximum HTML email client compatibility
+        'footer' => "",
+        'send callback' => 'messaging_contactology_send_msg', // Sending callback
+        'class' => 'Messaging_Method_Mail',
+        'filter' => 'messaging_html', // Default filter for this format
+        'anonymous' => TRUE, // This method supports anonymous destinations
+        'address_type' => 'mail',
+      );
+      return $info;
+  }
+}
+
+/**
+ * Implementation of hook_menu()
+ *
+ * Register an admin screen to configure the connection to Contactology.
+ *
+ * @return mixed
+ *   Array describing the menu entry.
+ */
+function messaging_contactology_menu() {
+  $items['admin/messaging/settings/method/contactology'] = array(
+    'title' => 'Contactology',
+    'description' => 'Options for messaging through Contactology.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('messaging_contactology_admin_settings'),
+    'file' => 'messaging_contactology.admin.inc',
+    'access arguments' => array('administer messaging'),
+    'type' => MENU_LOCAL_TASK,
+  );
+  $items['admin/messaging/settings/method/contactology/create'] = array(
+    'title' => 'Create Contactology Campaign',
+    'description' => 'Create a new Contactology campaign for use with Messaging.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('messaging_contactology_admin_campaign_form'),
+    'file' => 'messaging_contactology.admin.inc',
+    'access arguments' => array('administer messaging'),
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+/**
+ * Send mail message to user account via Contactology.
+ * 
+ * This is a callback function that will be invoked from messaging delivery
+ * methods. Its use is defined by the messaging_contactology_messaging hook.
+ * 
+ * @see messaging_message_send()
+ * @see messaging_contactology_messaging()
+ * 
+ * @param $destination
+ *   Single email address
+ * @param $message
+ *   Message array
+ * @param $params
+ *   Optional parameters for this method type
+ */
+function messaging_contactology_send_msg($address, $message, $params = array()) {
+  // Pull in the API wrapper provided by Contactology
+  require_once(drupal_get_path('module', 'messaging_contactology') . '/class.Contactology.php');
+  $c = new Contactology(messaging_contactology_api_key());
+  
+  try {
+    $result = $c->Campaign_Send_Transactional(
+      messaging_contactology_campaign_id(),
+      array(
+        'email' => $address,
+      ),
+      messaging_contactology_contact_source(), 
+      array(
+        'msg_subject' => $message->get_subject(),
+        'msg_body_html' => $message->get_body(),
+        'msg_body_text' => drupal_html_to_text($message->get_body()),
+      )
+    );
+  } catch (Exception $e) {
+    watchdog('messaging_contactology', 'Contactology send error: !details', array('details' => $e->getMessage()), WATCHDOG_ERROR);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+/**
+* Implementation of hook_disable()
+*
+* Inform the Messaging system when this module is disabled.
+*/
+function messaging_contactology_disable() {
+  messaging_method_disable('contactology');
+}
+
+/**
+ * Returns the API key to use when connecting to Contactology.
+ *
+ *
+ * @return string
+ *   API key
+*/
+function messaging_contactology_api_key() {
+  $key = variable_get('messaging_contactology_api_key', '');
+  if (!$key)
+  {
+    watchdog('messaging_contactology', 'Contactology API key has not been configured', array(), WATCHDOG_ERROR);
+  }
+  return $key;
+}
+
+/**
+ * Returns the Contactology campaign ID to use when sending messages.
+ *
+ * @todo Should probably be configurable based on the event type.
+ *
+ * @return integer
+ *   Campaign ID
+*/
+function messaging_contactology_campaign_id() {
+  $campaign = variable_get('messaging_contactology_campaign', '');
+  if (!$campaign)
+  {
+    watchdog('messaging_contactology', 'Contactology campaign has not been configured', array(), WATCHDOG_ERROR);
+  }
+  return $campaign;
+}
+
+/**
+ * Returns the contact source that will be reported to Contactology.
+ *
+ * Can be configured through the admin screen, or defaults to the site name.
+ *
+ * @return string
+ *   Contact source
+ */
+function messaging_contactology_contact_source() {
+  $source = variable_get('messaging_contactology_contact_source', '');
+  if (!$source)
+  {
+    $source = variable_get('site_name', 'Drupal');
+  }
+  return $source;
+}
